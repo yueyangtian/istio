@@ -307,7 +307,7 @@ func main() {
 		log.Errorf("Failed to get Xds response for %v. Error: %v", *resources, err)
 		return
 	}
-	strResponse, _ := gogoprotomarshal.ToJSONWithIndent(resp, " ")
+	strResponse, _ := gogoprotomarshal.ToYAML(resp)
 	if outputFile == nil || *outputFile == "" {
 		fmt.Printf("%v\n", strResponse)
 	} else if err := os.WriteFile(*outputFile, []byte(strResponse), 0o644); err != nil {
