@@ -59,6 +59,10 @@ const (
 func (s *Server) initConfigController(args *PilotArgs) error {
 	s.initStatusController(args, features.EnableStatus)
 	meshConfig := s.environment.Mesh()
+	// 判断配置文件来源决定启动监听器种类
+	// 1.对于老版本的mcp协议的兼容，目前已弃用
+	// 2.检查是否为本地配置，是的话启动本地配置监听器
+	// 3.启动k8s配置监听器
 	if len(meshConfig.ConfigSources) > 0 {
 		// Using MCP for config.
 		if err := s.initConfigSources(args); err != nil {
@@ -339,6 +343,7 @@ func (s *Server) initStatusController(args *PilotArgs, writeStatus bool) {
 }
 
 func (s *Server) makeKubeConfigController(args *PilotArgs) (model.ConfigStoreCache, error) {
+	//crdclient 会维护crd 不同类型，不同状态的的事件回调
 	return crdclient.New(s.kubeClient, args.Revision, args.RegistryOptions.KubeOptions.DomainSuffix)
 }
 

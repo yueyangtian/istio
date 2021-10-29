@@ -235,15 +235,18 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 	if err := s.initKubeClient(args); err != nil {
 		return nil, fmt.Errorf("error initializing kube client: %v", err)
 	}
-
+	//初始化cm中mesh相关配置，并通过fileWatcher 监听该挂载的cm的文件状态
 	s.initMeshConfiguration(args, s.fileWatcher)
 	spiffe.SetTrustDomain(s.environment.Mesh().GetTrustDomain())
-
+	//初始化cm中meshnetwork相关配置，通过env.fileWatcher 监听该挂载的cm的文件状态
 	s.initMeshNetworks(args, s.fileWatcher)
+	//注册配置变更时间，如果网络配置或者网格配置有变更的话将触发网格内配置全量更新的操作
 	s.initMeshHandlers()
+	//初始化集群本地地址，并注册更新集群本地地址回调
 	s.environment.Init()
 
 	// Options based on the current 'defaults' in istio.
+	// 为默认namespace istio-system 下添加pilot-discovery 相关证书
 	caOpts := &caOptions{
 		TrustDomain:      s.environment.Mesh().TrustDomain,
 		Namespace:        args.Namespace,
@@ -259,11 +262,12 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 	if err := s.maybeCreateCA(caOpts); err != nil {
 		return nil, err
 	}
-
+	// 添加证书操作完毕
+	// 初始化控制器
 	if err := s.initControllers(args); err != nil {
 		return nil, err
 	}
-
+	// 初始化xds服务生成器
 	s.XDSServer.InitGenerators(e, args.Namespace)
 
 	// Initialize workloadTrustBundle after CA has been initialized
@@ -884,6 +888,7 @@ func (s *Server) initRegistryEventHandlers() {
 	s.ServiceController().AppendServiceHandler(serviceHandler)
 
 	if s.configController != nil {
+		//该handler为crdclient的事件回调，主要作用为 1.统计配置变更 2.判断是否将变更信息推送至xdsServer模块
 		configHandler := func(prev config.Config, curr config.Config, event model.Event) {
 			defer func() {
 				if event != model.EventDelete {
@@ -1065,12 +1070,15 @@ func (s *Server) initControllers(args *PilotArgs) error {
 	log.Info("initializing controllers")
 	// Certificate controller is created before MCP controller in case MCP server pod
 	// waits to mount a certificate to be provisioned by the certificate controller.
+	// 初始化证书相关控制器
 	if err := s.initCertController(args); err != nil {
 		return fmt.Errorf("error initializing certificate controller: %v", err)
 	}
+	// 初始化配置相关控制器
 	if err := s.initConfigController(args); err != nil {
 		return fmt.Errorf("error initializing config controller: %v", err)
 	}
+	// 初始化服务相关控制器
 	if err := s.initServiceControllers(args); err != nil {
 		return fmt.Errorf("error initializing service controllers: %v", err)
 	}
