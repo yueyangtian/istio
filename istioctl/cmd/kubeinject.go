@@ -29,7 +29,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ghodss/yaml"
 	"github.com/hashicorp/go-multierror"
 	"github.com/spf13/cobra"
 	admission "k8s.io/api/admission/v1"
@@ -43,6 +42,7 @@ import (
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/util/podutils"
+	"sigs.k8s.io/yaml"
 
 	"istio.io/api/label"
 	meshconfig "istio.io/api/mesh/v1alpha1"
@@ -203,7 +203,7 @@ func GetFirstPod(client v1.CoreV1Interface, namespace string, selector string) (
 	if err != nil {
 		return nil, err
 	}
-	pods := []*corev1.Pod{}
+	pods := make([]*corev1.Pod, 0, len(podList.Items))
 	for i := range podList.Items {
 		pod := podList.Items[i]
 		pods = append(pods, &pod)
@@ -546,7 +546,7 @@ It's best to do kube-inject when the resource is initially created.
 	injectCmd.PersistentFlags().StringVar(&injectConfigFile, "injectConfigFile", "",
 		"Injection configuration filename. Cannot be used with --injectConfigMapName")
 	injectCmd.PersistentFlags().StringVar(&valuesFile, "valuesFile", "",
-		"injection values configuration filename.")
+		"Injection values configuration filename.")
 
 	injectCmd.PersistentFlags().StringVarP(&inFilename, "filename", "f",
 		"", "Input Kubernetes resource filename")

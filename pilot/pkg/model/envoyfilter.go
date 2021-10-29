@@ -18,7 +18,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gogo/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
 	networking "istio.io/api/networking/v1alpha3"
 	"istio.io/istio/pilot/pkg/util/sets"
@@ -65,6 +65,7 @@ var wellKnownVersions = map[string]string{
 	`^1\.10.*`: "1.10",
 	`^1\.11.*`: "1.11",
 	`^1\.12.*`: "1.12",
+	`^1\.13.*`: "1.13",
 	// Hopefully we have a better API by 1.13. If not, add it here
 }
 
@@ -122,8 +123,8 @@ func convertToEnvoyFilterWrapper(local *config.Config) *EnvoyFilterWrapper {
 		if cpw.Operation == networking.EnvoyFilter_Patch_INSERT_AFTER ||
 			cpw.Operation == networking.EnvoyFilter_Patch_INSERT_BEFORE ||
 			cpw.Operation == networking.EnvoyFilter_Patch_INSERT_FIRST {
-			// insert_before, after or first is applicable only for network filter and http filter
-			// convert the rest to add
+			// insert_before, after or first is applicable for network filter,
+			// http filter and http route, convert the rest to add
 			if cpw.ApplyTo != networking.EnvoyFilter_HTTP_FILTER &&
 				cpw.ApplyTo != networking.EnvoyFilter_NETWORK_FILTER &&
 				cpw.ApplyTo != networking.EnvoyFilter_HTTP_ROUTE {

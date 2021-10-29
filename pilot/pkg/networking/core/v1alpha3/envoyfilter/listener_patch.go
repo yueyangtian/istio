@@ -20,8 +20,8 @@ import (
 	xdslistener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/wellknown"
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes/any"
+	"google.golang.org/protobuf/proto"
+	any "google.golang.org/protobuf/types/known/anypb"
 
 	networking "istio.io/api/networking/v1alpha3"
 	"istio.io/istio/pilot/pkg/model"
@@ -73,13 +73,16 @@ func patchListeners(
 	if !skipAdds {
 		for _, lp := range efw.Patches[networking.EnvoyFilter_LISTENER] {
 			if lp.Operation == networking.EnvoyFilter_Patch_ADD {
+				// If listener ADD patch does not specify a patch context, only add for sidecar outbound.
+				if lp.Match.Context == networking.EnvoyFilter_ANY && patchContext != networking.EnvoyFilter_SIDECAR_OUTBOUND {
+					continue
+				}
 				if !commonConditionMatch(patchContext, lp) {
 					IncrementEnvoyFilterMetric(lp.Key(), Listener, false)
 					continue
 				}
-
 				// clone before append. Otherwise, subsequent operations on this listener will corrupt
-				// the master value stored in CP..
+				// the master value stored in CP.
 				listeners = append(listeners, proto.Clone(lp.Value).(*xdslistener.Listener))
 				IncrementEnvoyFilterMetric(lp.Key(), Listener, true)
 			}

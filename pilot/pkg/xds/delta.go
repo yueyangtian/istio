@@ -21,7 +21,6 @@ import (
 	"time"
 
 	discovery "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
-	"github.com/golang/protobuf/jsonpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
@@ -179,7 +178,7 @@ func (s *DiscoveryServer) pushConnectionDelta(con *Connection, pushEv *Event) er
 			totalDelayedPushes.With(typeTag.Value(v3.GetMetricType(w.TypeUrl))).Increment()
 			log.Debugf("%s: QUEUE for node:%s", v3.GetShortType(w.TypeUrl), con.proxy.ID)
 			con.proxy.Lock()
-			con.blockedPushes[w.TypeUrl] = con.blockedPushes[w.TypeUrl].Merge(pushEv.pushRequest)
+			con.blockedPushes[w.TypeUrl] = con.blockedPushes[w.TypeUrl].CopyMerge(pushEv.pushRequest)
 			con.proxy.Unlock()
 		}
 	}
@@ -290,7 +289,6 @@ func (s *DiscoveryServer) processDeltaRequest(req *discovery.DeltaDiscoveryReque
 	var request *model.PushRequest
 	push := s.globalPushContext()
 	if shouldRespond {
-		debugRequest(req)
 		// This is a request, trigger a full push for this type. Override the blocked push (if it exists),
 		// as this full push is guaranteed to be a superset of what we would have pushed from the blocked push.
 		request = &model.PushRequest{Full: true, Push: push}
@@ -564,17 +562,4 @@ func extractNames(res []*discovery.Resource) []string {
 		names = append(names, r.Name)
 	}
 	return names
-}
-
-// TODO: remove, just for development
-func debugRequest(req *discovery.DeltaDiscoveryRequest) {
-	debug, _ := (&jsonpb.Marshaler{Indent: " "}).MarshalToString(&discovery.DeltaDiscoveryRequest{
-		TypeUrl:                  req.TypeUrl,
-		ResourceNamesSubscribe:   req.ResourceNamesSubscribe,
-		ResourceNamesUnsubscribe: req.ResourceNamesUnsubscribe,
-		InitialResourceVersions:  req.InitialResourceVersions,
-		ResponseNonce:            req.ResponseNonce,
-		ErrorDetail:              req.ErrorDetail,
-	})
-	log.Debugf("delta request: %s", debug)
 }

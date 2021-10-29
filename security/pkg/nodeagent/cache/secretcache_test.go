@@ -20,17 +20,19 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pkg/file"
 	"istio.io/istio/pkg/security"
 	"istio.io/istio/pkg/test/util/retry"
 	"istio.io/istio/pkg/testcerts"
 	"istio.io/istio/security/pkg/nodeagent/caclient/providers/mock"
+	"istio.io/istio/security/pkg/nodeagent/cafile"
+	pkiutil "istio.io/istio/security/pkg/pki/util"
 	"istio.io/pkg/log"
 )
 
@@ -56,6 +58,7 @@ func createCache(t *testing.T, caClient security.Client, notifyCb func(resourceN
 
 func testWorkloadAgentGenerateSecret(t *testing.T, isUsingPluginProvider bool) {
 	fakeCACli, err := mock.NewMockCAClient(time.Hour, true)
+	var got, want []byte
 	if err != nil {
 		t.Fatalf("Error creating Mock CA client: %v", err)
 	}
@@ -81,7 +84,8 @@ func testWorkloadAgentGenerateSecret(t *testing.T, isUsingPluginProvider bool) {
 		t.Fatalf("Failed to get secrets: %v", err)
 	}
 	// Root cert is the last element in the generated certs.
-	if got, want := gotSecretRoot.RootCert, []byte(fakeCACli.GeneratedCerts[0][2]); !bytes.Equal(got, want) {
+	got, want = gotSecretRoot.RootCert, []byte(strings.TrimSuffix(fakeCACli.GeneratedCerts[0][2], "\n"))
+	if !bytes.Equal(got, want) {
 		t.Errorf("Got unexpected root certificate. Got: %v\n want: %v", string(got), string(want))
 	}
 
@@ -96,7 +100,7 @@ func testWorkloadAgentGenerateSecret(t *testing.T, isUsingPluginProvider bool) {
 	}
 
 	// Root cert is the last element in the generated certs.
-	want := []byte(fakeCACli.GeneratedCerts[0][2])
+	want = []byte(fakeCACli.GeneratedCerts[0][2])
 	if got := sc.cache.GetRoot(); !bytes.Equal(got, want) {
 		t.Errorf("Got unexpected root certificate. Got: %v\n want: %v", string(got), string(want))
 	}
@@ -307,7 +311,7 @@ func setupTestDir(t *testing.T, sc *SecretManagerClient) {
 			t.Fatal(err)
 		}
 	}
-	sc.existingCertificateFile = model.SdsCertificateConfig{
+	sc.existingCertificateFile = security.SdsCertificateConfig{
 		CertificatePath:   filepath.Join(dir, "cert-chain.pem"),
 		PrivateKeyPath:    filepath.Join(dir, "key.pem"),
 		CaCertificatePath: filepath.Join(dir, "root-cert.pem"),
@@ -482,7 +486,7 @@ func verifySecret(t *testing.T, gotSecret *security.SecretItem, expectedSecret *
 		t.Fatalf("resource name:: expected %s but got %s", expectedSecret.ResourceName,
 			gotSecret.ResourceName)
 	}
-	cfg, ok := model.SdsCertificateConfigFromResourceName(expectedSecret.ResourceName)
+	cfg, ok := security.SdsCertificateConfigFromResourceName(expectedSecret.ResourceName)
 	if expectedSecret.ResourceName == security.RootCertReqResourceName || (ok && cfg.IsRootCertificate()) {
 		if !bytes.Equal(expectedSecret.RootCert, gotSecret.RootCert) {
 			t.Fatalf("root cert: expected %v but got %v", expectedSecret.RootCert,
@@ -557,7 +561,7 @@ func TestProxyConfigAnchors(t *testing.T) {
 	u.Expect(map[string]int{security.RootCertReqResourceName: 1})
 	u.Reset()
 
-	caClientRootCert := []byte(fakeCACli.GeneratedCerts[0][2])
+	caClientRootCert := []byte(strings.TrimRight(fakeCACli.GeneratedCerts[0][2], "\n"))
 	// Ensure that contents of the rootCert are correct.
 	checkSecret(t, sc, security.RootCertReqResourceName, security.SecretItem{
 		ResourceName: security.RootCertReqResourceName,
@@ -576,11 +580,33 @@ func TestProxyConfigAnchors(t *testing.T) {
 	u.Expect(map[string]int{security.RootCertReqResourceName: 1})
 	u.Reset()
 
+	concatCerts := func(certs ...string) []byte {
+		expectedRootBytes := []byte{}
+		sort.Strings(certs)
+		for _, cert := range certs {
+			expectedRootBytes = pkiutil.AppendCertByte(expectedRootBytes, []byte(cert))
+		}
+		return expectedRootBytes
+	}
+
+	expectedCerts := concatCerts(string(rootCert), string(caClientRootCert))
 	// Ensure that contents of the rootCert are correct.
 	checkSecret(t, sc, security.RootCertReqResourceName, security.SecretItem{
 		ResourceName: security.RootCertReqResourceName,
-		RootCert:     sc.mergeConfigTrustBundle(caClientRootCert),
+		RootCert:     expectedCerts,
 	})
+
+	// Add Duplicates
+	sc.UpdateConfigTrustBundle(expectedCerts)
+	// Ensure that contents of the rootCert are correct without the duplicate caClientRootCert
+	checkSecret(t, sc, security.RootCertReqResourceName, security.SecretItem{
+		ResourceName: security.RootCertReqResourceName,
+		RootCert:     expectedCerts,
+	})
+
+	if !bytes.Equal(sc.mergeConfigTrustBundle([]string{string(caClientRootCert), string(rootCert)}), expectedCerts) {
+		t.Fatalf("deduplicate test failed!")
+	}
 
 	// Update the proxyConfig with fakeCaClient certs
 	sc.UpdateConfigTrustBundle(caClientRootCert)
@@ -594,7 +620,7 @@ func TestProxyConfigAnchors(t *testing.T) {
 	// Check request for workload root-certs merges configuration with ProxyConfig TrustAnchor
 	checkSecret(t, sc, security.RootCertReqResourceName, security.SecretItem{
 		ResourceName: security.RootCertReqResourceName,
-		RootCert:     sc.mergeConfigTrustBundle(rootCert),
+		RootCert:     concatCerts(string(rootCert), string(caClientRootCert)),
 	})
 
 	// Check request for non-workload root-certs doesn't configuration with ProxyConfig TrustAnchor
@@ -602,4 +628,56 @@ func TestProxyConfigAnchors(t *testing.T) {
 		ResourceName: sc.existingCertificateFile.GetRootResourceName(),
 		RootCert:     rootCert,
 	})
+}
+
+func TestOSCACertGenerateSecret(t *testing.T) {
+	fakeCACli, err := mock.NewMockCAClient(time.Hour, false)
+	if err != nil {
+		t.Fatalf("Error creating Mock CA client: %v", err)
+	}
+	opt := &security.Options{}
+
+	fakePlugin := mock.NewMockTokenExchangeServer(nil)
+	opt.TokenExchanger = fakePlugin
+
+	sc := createCache(t, fakeCACli, func(resourceName string) {}, security.Options{CARootPath: cafile.CACertFilePath})
+	certPath := security.GetOSRootFilePath()
+	expected, err := sc.GenerateSecret("file-root:" + certPath)
+	if err != nil {
+		t.Fatalf("Could not get OS Cert: %v", err)
+	}
+
+	gotSecret, err := sc.GenerateSecret(security.FileRootSystemCACert)
+	if err != nil {
+		t.Fatalf("Error using %s: %v", security.FileRootSystemCACert, err)
+	}
+	if !bytes.Equal(gotSecret.RootCert, expected.RootCert) {
+		t.Fatal("Certs did not match")
+	}
+}
+
+func TestOSCACertGenerateSecretEmpty(t *testing.T) {
+	fakeCACli, err := mock.NewMockCAClient(time.Hour, false)
+	if err != nil {
+		t.Fatalf("Error creating Mock CA client: %v", err)
+	}
+	opt := &security.Options{}
+
+	fakePlugin := mock.NewMockTokenExchangeServer(nil)
+	opt.TokenExchanger = fakePlugin
+
+	sc := createCache(t, fakeCACli, func(resourceName string) {}, security.Options{})
+	certPath := security.GetOSRootFilePath()
+	expected, err := sc.GenerateSecret("file-root:" + certPath)
+	if err != nil {
+		t.Fatalf(": %v", err)
+	}
+
+	gotSecret, err := sc.GenerateSecret(security.FileRootSystemCACert)
+	if err != nil && len(gotSecret.RootCert) != 0 {
+		t.Fatalf("Error using %s: %v", security.FileRootSystemCACert, err)
+	}
+	if bytes.Equal(gotSecret.RootCert, expected.RootCert) {
+		t.Fatal("Certs did match")
+	}
 }

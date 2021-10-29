@@ -73,7 +73,7 @@ kind: GatewayClass
 metadata:
   name: istio
 spec:
-  controller: istio.io/gateway-controller
+  controllerName: istio.io/gateway-controller
 ---
 apiVersion: gateway.networking.k8s.io/v1alpha2
 kind: Gateway
@@ -81,6 +81,9 @@ metadata:
   name: gateway
   namespace: istio-system
 spec:
+  addresses:
+  - value: istio-ingressgateway
+    type: Hostname
   gatewayClassName: istio
   listeners:
   - name: http
@@ -105,8 +108,8 @@ spec:
         from: All
     tls:
       mode: Terminate
-      certificateRef:
-        kind: Secret
+      certificateRefs:
+      - kind: Secret
         name: test-gateway-cert-cross
         namespace: "%s"
   - name: tls-same
@@ -118,8 +121,8 @@ spec:
         from: All
     tls:
       mode: Terminate
-      certificateRef:
-        kind: Secret
+      certificateRefs:
+      - kind: Secret
         name: test-gateway-cert-same
 ---`, apps.Namespace.Name()))
 				return err
@@ -138,7 +141,7 @@ spec:
   rules:
   - matches:
     - path:
-        type: Prefix
+        type: PathPrefix
         value: /get/
     backendRefs:
     - name: b
@@ -171,7 +174,7 @@ spec:
   rules:
   - matches:
     - path:
-        type: Prefix
+        type: PathPrefix
         value: /path
     filters:
     - type: RequestHeaderModifier
@@ -229,12 +232,47 @@ spec:
 							if err != nil {
 								return err
 							}
-							if s := kstatus.GetCondition(gwc.Status.Conditions, string(k8s.GatewayClassConditionStatusAdmitted)).Status; s != metav1.ConditionTrue {
+							if s := kstatus.GetCondition(gwc.Status.Conditions, string(k8s.GatewayClassConditionStatusAccepted)).Status; s != metav1.ConditionTrue {
 								return fmt.Errorf("expected status %q, got %q", metav1.ConditionTrue, s)
 							}
 							return nil
 						})
 					})
+				})
+				t.NewSubTest("managed").Run(func(t framework.TestContext) {
+					t.Config().ApplyYAMLOrFail(t, apps.Namespace.Name(), `apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: Gateway
+metadata:
+  name: gateway
+spec:
+  gatewayClassName: istio
+  listeners:
+  - name: default
+    hostname: "*.example.com"
+    port: 80
+    protocol: HTTP
+---
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: HTTPRoute
+metadata:
+  name: http
+spec:
+  parentRefs:
+  - name: gateway
+  rules:
+  - backendRefs:
+    - name: b
+      port: 80
+`)
+					apps.PodB[0].CallWithRetryOrFail(t, echo.CallOptions{
+						Port:   &echo.Port{ServicePort: 80},
+						Scheme: scheme.HTTP,
+						Headers: map[string][]string{
+							"Host": {"bar.example.com"},
+						},
+						Address:   fmt.Sprintf("gateway.%s.svc.cluster.local", apps.Namespace.Name()),
+						Validator: echo.ExpectOK(),
+					}, retry.Timeout(time.Minute))
 				})
 			}
 		})
@@ -658,7 +696,7 @@ func TestCustomGateway(t *testing.T) {
 			templateParams := map[string]string{
 				"imagePullSecret": image.PullSecretNameOrFail(t),
 				"injectLabel":     injectLabel,
-				"host":            apps.PodA[0].Config().FQDN(),
+				"host":            apps.PodA[0].Config().ClusterLocalFQDN(),
 				"imagePullPolicy": image.PullImagePolicy(t),
 			}
 
@@ -810,7 +848,7 @@ spec:
         host: %s
         port:
           number: 80
-`, apps.PodA[0].Config().FQDN()))
+`, apps.PodA[0].Config().ClusterLocalFQDN()))
 				apps.PodB[0].CallWithRetryOrFail(t, echo.CallOptions{
 					Port:      &echo.Port{ServicePort: 80},
 					Scheme:    scheme.HTTP,
@@ -877,7 +915,7 @@ spec:
         host: %s
         port:
           number: 80
-`, apps.PodA[0].Config().FQDN()))
+`, apps.PodA[0].Config().ClusterLocalFQDN()))
 				apps.PodB[0].CallWithRetryOrFail(t, echo.CallOptions{
 					Port:      &echo.Port{ServicePort: 80},
 					Scheme:    scheme.HTTP,

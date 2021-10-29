@@ -39,6 +39,7 @@ import (
 	"istio.io/istio/security/pkg/stsservice/tokenmanager"
 	cleaniptables "istio.io/istio/tools/istio-clean-iptables/pkg/cmd"
 	iptables "istio.io/istio/tools/istio-iptables/pkg/cmd"
+	iptableslog "istio.io/istio/tools/istio-iptables/pkg/log"
 	"istio.io/pkg/collateral"
 	"istio.io/pkg/log"
 	"istio.io/pkg/version"
@@ -146,6 +147,8 @@ var (
 				}
 			}
 
+			go iptableslog.ReadNFLOGSocket(ctx)
+
 			// On SIGINT or SIGTERM, cancel the context, triggering a graceful shutdown
 			go cmd.WaitSignalFunc(cancel)
 
@@ -218,7 +221,7 @@ func initStatusServer(ctx context.Context, proxy *model.Proxy, proxyConfig *mesh
 
 func initStsServer(proxy *model.Proxy, tokenManager security.TokenManager) (*stsserver.Server, error) {
 	localHostAddr := localHostIPv4
-	if options.IsIPv6Proxy(proxy.IPAddresses) {
+	if network.IsIPv6Proxy(proxy.IPAddresses) {
 		localHostAddr = localHostIPv6
 	}
 	stsServer, err := stsserver.NewServer(stsserver.Config{
