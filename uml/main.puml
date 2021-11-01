@@ -1,0 +1,38 @@
+@startuml
+namespace main {
+    class main {
+        + main()
+    }
+}
+namespace cobra {
+    class Command {
+        + Short string
+        + Use string
+        + PreE func
+        + RunE func
+        + AddCommand()
+        + Exec()
+        ...
+        ...()
+    }
+}
+namespace app {
+    class app {
+        + NewRootCommand()
+        ...()
+        ...
+    }
+}
+namespace boostarp {
+    class boostarp {
+        + NewServer()
+        + Start()
+        ...
+        ...()
+    }
+}
+main.main --> cobra.Command
+main.main --> app.app
+app.app --> cobra.Command
+app.app --> boostarp.boostarp
+@enduml

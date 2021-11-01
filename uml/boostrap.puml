@@ -1,0 +1,14 @@
+@startuml
+title boostrap
+namespace boostrap {
+    class boostrap {
+        + NewServer()
+    }
+    class Server {
+        + Start()
+        + WaitUntilCompletion()
+    }
+}
+
+boostrap.boostrap --> boostrap.Server 
+@enduml
